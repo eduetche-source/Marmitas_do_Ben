@@ -71,10 +71,10 @@ class EscolhaAssinante(Base):
     )
 
     produto_id = Column(
-        Integer,
-        ForeignKey("produtos.id", ondelete="CASCADE"),
-        nullable=False,
-    )
+    Integer,
+    ForeignKey("produtos.id"),
+    nullable=False,
+)
 
     quantidade = Column(
         Integer,
