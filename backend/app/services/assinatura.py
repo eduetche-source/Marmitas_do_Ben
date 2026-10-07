@@ -1,7 +1,7 @@
 ﻿from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from ..models.assinatura import Assinatura
+from ..models.assinatura import Assinatura, CompraAssinatura
 from ..models.cliente import Cliente
 
 STATUS_PENDENTE = "Pendente"
@@ -37,6 +37,14 @@ def contratar_assinatura(db: Session, cliente_id: int, plano_marmitas: int) -> A
         status=STATUS_PENDENTE,
     )
     db.add(nova)
+    
+    db.add(
+        CompraAssinatura(
+            cliente_id=cliente_id,
+            plano_marmitas=plano_marmitas,
+        )
+    )
+
     try:
         db.commit()
     except IntegrityError:
