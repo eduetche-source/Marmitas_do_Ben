@@ -68,6 +68,13 @@ class Cliente(Base):
         cascade="all, delete-orphan",
     )
 
+    # Historico de compras de plano (contratacao inicial e renovacoes).
+    compras_assinatura = relationship(
+        "CompraAssinatura",
+        back_populates="cliente",
+        cascade="all, delete-orphan",
+    )
+
     # Um cliente pode realizar vários pedidos avulsos.
     pedidos_avulsos = relationship(
         "PedidoAvulso",

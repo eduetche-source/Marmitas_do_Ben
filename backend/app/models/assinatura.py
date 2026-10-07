@@ -97,3 +97,36 @@ class EscolhaAssinante(Base):
         "Produto",
         back_populates="escolhas_assinante",
     )
+
+
+
+class CompraAssinatura(Base):
+    __tablename__ = "compras_assinatura"
+
+    id = Column(
+        Integer,
+        primary_key=True,
+        index=True,
+    )
+
+    cliente_id = Column(
+        Integer,
+        ForeignKey("clientes.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+
+    plano_marmitas = Column(
+        Integer,
+        nullable=False,
+    )
+
+    data_compra = Column(
+        DateTime,
+        server_default=func.current_timestamp(),
+        nullable=True,
+    )
+
+    cliente = relationship(
+        "Cliente",
+        back_populates="compras_assinatura",
+    )
