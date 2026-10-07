@@ -18,10 +18,22 @@ from .models.assinatura import (
 
 from .schemas.pedido import PedidoCreateSchema
 
+from .schemas.assinatura import (
+    AssinaturaCreateSchema,
+    AssinaturaResponseSchema,
+)
+
 from .services.cronograma import (
     obter_ciclo_cardapio_atual,
     calcular_data_entrega_pedido,
 )
+
+from .services.assinatura import (
+    contratar_assinatura,
+    ClienteNaoEncontradoError,
+    AssinaturaJaExisteError,
+)
+
 app = FastAPI(title="Marmitas do Ben API")
 
 @app.get("/")
@@ -77,3 +89,13 @@ def criar_pedido(payload: PedidoCreateSchema, db: Session = Depends(get_db)):
         "data_entrega_prevista": data_entrega_calculada.strftime("%Y-%m-%d"), # Exibe dinamicamente
         "total_itens": len(novo_pedido.itens)
     }
+
+
+@app.post("/assinaturas", status_code=201, response_model=AssinaturaResponseSchema)
+def criar_assinatura(payload: AssinaturaCreateSchema, db: Session = Depends(get_db)):
+    try:
+        return contratar_assinatura(db, payload.cliente_id, payload.plano_marmitas)
+    except ClienteNaoEncontradoError:
+        raise HTTPException(status_code=404, detail=f"Cliente com ID {payload.cliente_id} não encontrado.")
+    except AssinaturaJaExisteError:
+        raise HTTPException(status_code=409, detail="Este cliente já possui uma assinatura.")
