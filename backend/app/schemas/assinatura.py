@@ -40,3 +40,7 @@ class EscolhaRealizadaSchema(BaseModel):
 
     escolha: EscolhaResponseSchema
     saldo_restante: int
+
+
+class RenovacaoCreateSchema(BaseModel):
+    plano_marmitas: Literal[12, 16, 20, 24]
