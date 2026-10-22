@@ -1,3 +1,5 @@
+from dataclasses import dataclass
+
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -77,9 +79,15 @@ def contratar_assinatura(db: Session, cliente_id: int, plano_marmitas: int) -> A
     return nova
 
 
+@dataclass
+class ResultadoEscolha:
+    escolha: EscolhaAssinante
+    saldo_restante: int
+
+
 def escolher_marmita(
     db: Session, cliente_id: int, produto_id: int, quantidade: int
-) -> EscolhaAssinante:
+) -> ResultadoEscolha:
     cliente = db.get(Cliente, cliente_id)
     if cliente is None:
         raise ClienteNaoEncontradoError(cliente_id)
@@ -109,6 +117,7 @@ def escolher_marmita(
         raise SaldoInsuficienteError(quantidade)
 
     assinatura.saldo_restante -= quantidade
+    saldo_restante = assinatura.saldo_restante
     escolha = EscolhaAssinante(
         cliente_id=cliente_id,
         produto_id=produto_id,
@@ -119,4 +128,4 @@ def escolher_marmita(
     # Um unico commit: saldo e escolha sao gravados juntos.
     db.commit()
     db.refresh(escolha)
-    return escolha
+    return ResultadoEscolha(escolha=escolha, saldo_restante=saldo_restante)
