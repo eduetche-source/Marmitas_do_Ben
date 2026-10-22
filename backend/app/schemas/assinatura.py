@@ -33,3 +33,10 @@ class EscolhaResponseSchema(BaseModel):
     produto_id: int
     quantidade: int
     data_escolha: Optional[datetime] = None
+
+
+class EscolhaRealizadaSchema(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    escolha: EscolhaResponseSchema
+    saldo_restante: int
