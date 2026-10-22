@@ -1,8 +1,10 @@
-﻿from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from ..models.assinatura import Assinatura, CompraAssinatura
+from ..models.assinatura import Assinatura, CompraAssinatura, EscolhaAssinante
 from ..models.cliente import Cliente
+from ..models.produto import Produto
+from .cronograma import obter_ciclo_cardapio_atual
 
 STATUS_PENDENTE = "Pendente"
 STATUS_ATIVA = "Ativa"
@@ -18,6 +20,26 @@ class ClienteNaoEncontradoError(AssinaturaError):
 
 
 class AssinaturaJaExisteError(AssinaturaError):
+    pass
+
+
+class AssinaturaNaoEncontradaError(AssinaturaError):
+    pass
+
+
+class AssinaturaNaoAtivaError(AssinaturaError):
+    pass
+
+
+class ProdutoNaoEncontradoError(AssinaturaError):
+    pass
+
+
+class ProdutoForaDoCicloError(AssinaturaError):
+    pass
+
+
+class SaldoInsuficienteError(AssinaturaError):
     pass
 
 
@@ -53,3 +75,48 @@ def contratar_assinatura(db: Session, cliente_id: int, plano_marmitas: int) -> A
 
     db.refresh(nova)
     return nova
+
+
+def escolher_marmita(
+    db: Session, cliente_id: int, produto_id: int, quantidade: int
+) -> EscolhaAssinante:
+    cliente = db.get(Cliente, cliente_id)
+    if cliente is None:
+        raise ClienteNaoEncontradoError(cliente_id)
+
+    # with_for_update trava a linha da assinatura ate o commit: duas escolhas
+    # simultaneas nao conseguem gastar o mesmo saldo.
+    assinatura = (
+        db.query(Assinatura)
+        .filter(Assinatura.cliente_id == cliente_id)
+        .with_for_update()
+        .first()
+    )
+    if assinatura is None:
+        raise AssinaturaNaoEncontradaError(cliente_id)
+
+    if assinatura.status != STATUS_ATIVA:
+        raise AssinaturaNaoAtivaError(cliente_id)
+
+    produto = db.get(Produto, produto_id)
+    if produto is None:
+        raise ProdutoNaoEncontradoError(produto_id)
+
+    if not produto.ativo or produto.ciclo_cardapio != obter_ciclo_cardapio_atual():
+        raise ProdutoForaDoCicloError(produto_id)
+
+    if quantidade > assinatura.saldo_restante:
+        raise SaldoInsuficienteError(quantidade)
+
+    assinatura.saldo_restante -= quantidade
+    escolha = EscolhaAssinante(
+        cliente_id=cliente_id,
+        produto_id=produto_id,
+        quantidade=quantidade,
+    )
+    db.add(escolha)
+
+    # Um unico commit: saldo e escolha sao gravados juntos.
+    db.commit()
+    db.refresh(escolha)
+    return escolha
