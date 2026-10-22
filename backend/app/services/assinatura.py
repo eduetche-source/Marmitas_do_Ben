@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+﻿from dataclasses import dataclass
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -42,6 +42,10 @@ class ProdutoForaDoCicloError(AssinaturaError):
 
 
 class SaldoInsuficienteError(AssinaturaError):
+    pass
+
+
+class AssinaturaPendenteError(AssinaturaError):
     pass
 
 
@@ -129,3 +133,40 @@ def escolher_marmita(
     db.commit()
     db.refresh(escolha)
     return ResultadoEscolha(escolha=escolha, saldo_restante=saldo_restante)
+
+
+def renovar_assinatura(db: Session, cliente_id: int, plano_marmitas: int) -> Assinatura:
+    cliente = db.get(Cliente, cliente_id)
+    if cliente is None:
+        raise ClienteNaoEncontradoError(cliente_id)
+
+    # with_for_update trava a linha: duas renovacoes simultaneas nao se perdem.
+    assinatura = (
+        db.query(Assinatura)
+        .filter(Assinatura.cliente_id == cliente_id)
+        .with_for_update()
+        .first()
+    )
+    if assinatura is None:
+        raise AssinaturaNaoEncontradaError(cliente_id)
+
+    # Pendente = ja existe uma compra aguardando pagamento.
+    if assinatura.status == STATUS_PENDENTE:
+        raise AssinaturaPendenteError(cliente_id)
+
+    # Sobras nao se perdem: o plano comprado e somado ao saldo atual.
+    assinatura.saldo_restante += plano_marmitas
+    assinatura.plano_marmitas = plano_marmitas
+    assinatura.status = STATUS_PENDENTE
+
+    db.add(
+        CompraAssinatura(
+            cliente_id=cliente_id,
+            plano_marmitas=plano_marmitas,
+        )
+    )
+
+    # Um unico commit: saldo, status e historico sao gravados juntos.
+    db.commit()
+    db.refresh(assinatura)
+    return assinatura
