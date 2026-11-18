@@ -12,6 +12,11 @@ STATUS_PENDENTE = "Pendente"
 STATUS_ATIVA = "Ativa"
 STATUS_ENCERRADA = "Encerrada"
 
+# Situacao do pagamento de cada compra (compras_assinatura.status_pagamento).
+COMPRA_PENDENTE = "Pendente"
+COMPRA_PAGA = "Paga"
+COMPRA_CANCELADA = "Cancelada"
+
 
 class AssinaturaError(Exception):
     """Base das excecoes de dominio do modulo de assinaturas."""
@@ -58,18 +63,21 @@ def contratar_assinatura(db: Session, cliente_id: int, plano_marmitas: int) -> A
     if existente is not None:
         raise AssinaturaJaExisteError(cliente_id)
 
+    # Saldo comeca em 0: so e creditado quando o pagamento da compra
+    # for confirmado.
     nova = Assinatura(
         cliente_id=cliente_id,
         plano_marmitas=plano_marmitas,
-        saldo_restante=plano_marmitas,
+        saldo_restante=0,
         status=STATUS_PENDENTE,
     )
     db.add(nova)
-    
+
     db.add(
         CompraAssinatura(
             cliente_id=cliente_id,
             plano_marmitas=plano_marmitas,
+            status_pagamento=COMPRA_PENDENTE,
         )
     )
 
