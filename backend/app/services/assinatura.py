@@ -196,13 +196,15 @@ def renovar_assinatura(db: Session, cliente_id: int, plano_marmitas: int) -> Com
     return compra
 
 
-def confirmar_pagamento(db: Session, cliente_id: int) -> Assinatura:
+def _buscar_compra_pendente(db: Session, cliente_id: int) -> tuple[Assinatura, CompraAssinatura]:
+    """Passos comuns de confirmar e cancelar: valida o cliente, trava a
+    assinatura e devolve a compra aguardando pagamento."""
     cliente = db.get(Cliente, cliente_id)
     if cliente is None:
         raise ClienteNaoEncontradoError(cliente_id)
 
-    # with_for_update trava a assinatura: duas confirmacoes simultaneas
-    # nao creditam o mesmo plano duas vezes.
+    # with_for_update trava a assinatura: duas operacoes simultaneas sobre a
+    # mesma compra (ex.: confirmar duas vezes) sao atendidas uma de cada vez.
     assinatura = (
         db.query(Assinatura)
         .filter(Assinatura.cliente_id == cliente_id)
@@ -223,6 +225,12 @@ def confirmar_pagamento(db: Session, cliente_id: int) -> Assinatura:
     if compra is None:
         raise SemCompraPendenteError(cliente_id)
 
+    return assinatura, compra
+
+
+def confirmar_pagamento(db: Session, cliente_id: int) -> Assinatura:
+    assinatura, compra = _buscar_compra_pendente(db, cliente_id)
+
     # Pagamento confirmado: so agora o plano entra no saldo.
     # Sobras nao se perdem: o plano e somado ao saldo atual.
     compra.status_pagamento = COMPRA_PAGA
@@ -231,6 +239,23 @@ def confirmar_pagamento(db: Session, cliente_id: int) -> Assinatura:
     assinatura.status = STATUS_ATIVA
 
     # Um unico commit: compra e assinatura sao gravadas juntas.
+    db.commit()
+    db.refresh(assinatura)
+    return assinatura
+
+
+def cancelar_compra(db: Session, cliente_id: int) -> Assinatura:
+    assinatura, compra = _buscar_compra_pendente(db, cliente_id)
+
+    # Compra nao paga nunca entrou no saldo: nada a descontar.
+    compra.status_pagamento = COMPRA_CANCELADA
+
+    # Assinatura Pendente = primeira compra, nunca paga: o cliente desistiu
+    # antes de comecar. Nos outros casos (renovacao), o status nao muda e as
+    # sobras ja pagas continuam valendo.
+    if assinatura.status == STATUS_PENDENTE:
+        assinatura.status = STATUS_ENCERRADA
+
     db.commit()
     db.refresh(assinatura)
     return assinatura
