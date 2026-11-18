@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from ..models.cliente import Cliente
 from ..models.produto import Produto, PedidoAvulso, ItemPedidoAvulso
-from .cronograma import calcular_data_entrega_pedido
+from .cronograma import calcular_data_entrega_pedido, obter_ciclo_cardapio_atual
 
 STATUS_PAGAMENTO_PENDENTE = "Pendente"
 VALOR_FRETE = 10.00
@@ -22,6 +22,12 @@ class PedidoClienteNaoEncontradoError(PedidoError):
 
 
 class PedidoProdutoNaoEncontradoError(PedidoError):
+    def __init__(self, produto_id: int):
+        super().__init__(produto_id)
+        self.produto_id = produto_id
+
+
+class PedidoProdutoForaDoCicloError(PedidoError):
     def __init__(self, produto_id: int):
         super().__init__(produto_id)
         self.produto_id = produto_id
@@ -49,10 +55,17 @@ def criar_pedido_avulso(db: Session, cliente_id: int, itens: list) -> ResultadoP
         status_pagamento=STATUS_PAGAMENTO_PENDENTE,
     )
 
+    # Pedido avulso segue o mesmo cardapio das assinaturas: so produtos
+    # ativos e do ciclo atual.
+    ciclo_atual = obter_ciclo_cardapio_atual()
+
     for item in itens:
         produto = db.get(Produto, item.produto_id)
         if produto is None:
             raise PedidoProdutoNaoEncontradoError(item.produto_id)
+
+        if not produto.ativo or produto.ciclo_cardapio != ciclo_atual:
+            raise PedidoProdutoForaDoCicloError(item.produto_id)
 
         pedido.itens.append(
             ItemPedidoAvulso(
