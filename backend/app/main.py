@@ -23,6 +23,7 @@ from .schemas.assinatura import (
     AssinaturaResponseSchema,
     EscolhaCreateSchema,
     EscolhaRealizadaSchema,
+    RenovacaoCreateSchema,
 )
 
 from .services.cronograma import (
@@ -40,6 +41,8 @@ from .services.assinatura import (
     ProdutoForaDoCicloError,
     SaldoInsuficienteError,
     escolher_marmita,
+    renovar_assinatura,
+    AssinaturaPendenteError,
 )
 
 app = FastAPI(title="Marmitas do Ben API")
@@ -129,3 +132,19 @@ def criar_escolha(cliente_id: int, payload: EscolhaCreateSchema, db: Session = D
         raise HTTPException(status_code=422, detail="Esta marmita não está disponível no cardápio atual.")
     except SaldoInsuficienteError:
         raise HTTPException(status_code=422, detail="Quantidade maior que o saldo restante da assinatura.")
+
+
+@app.post(
+    "/assinaturas/{cliente_id}/renovacoes",
+    status_code=201,
+    response_model=AssinaturaResponseSchema,
+)
+def criar_renovacao(cliente_id: int, payload: RenovacaoCreateSchema, db: Session = Depends(get_db)):
+    try:
+        return renovar_assinatura(db, cliente_id, payload.plano_marmitas)
+    except ClienteNaoEncontradoError:
+        raise HTTPException(status_code=404, detail=f"Cliente com ID {cliente_id} não encontrado.")
+    except AssinaturaNaoEncontradaError:
+        raise HTTPException(status_code=404, detail="Este cliente não possui assinatura.")
+    except AssinaturaPendenteError:
+        raise HTTPException(status_code=409, detail="Já existe uma compra aguardando pagamento.")
