@@ -24,6 +24,7 @@ from .schemas.assinatura import (
     EscolhaCreateSchema,
     EscolhaRealizadaSchema,
     RenovacaoCreateSchema,
+    CompraResponseSchema,
 )
 
 from .services.cronograma import (
@@ -42,7 +43,7 @@ from .services.assinatura import (
     SaldoInsuficienteError,
     escolher_marmita,
     renovar_assinatura,
-    AssinaturaPendenteError,
+    CompraPendenteError,
 )
 
 from .services.pedido import (
@@ -128,7 +129,7 @@ def criar_escolha(cliente_id: int, payload: EscolhaCreateSchema, db: Session = D
 @app.post(
     "/assinaturas/{cliente_id}/renovacoes",
     status_code=201,
-    response_model=AssinaturaResponseSchema,
+    response_model=CompraResponseSchema,
 )
 def criar_renovacao(cliente_id: int, payload: RenovacaoCreateSchema, db: Session = Depends(get_db)):
     try:
@@ -137,5 +138,5 @@ def criar_renovacao(cliente_id: int, payload: RenovacaoCreateSchema, db: Session
         raise HTTPException(status_code=404, detail=f"Cliente com ID {cliente_id} não encontrado.")
     except AssinaturaNaoEncontradaError:
         raise HTTPException(status_code=404, detail="Este cliente não possui assinatura.")
-    except AssinaturaPendenteError:
+    except CompraPendenteError:
         raise HTTPException(status_code=409, detail="Já existe uma compra aguardando pagamento.")

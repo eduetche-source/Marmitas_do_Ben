@@ -50,8 +50,8 @@ class SaldoInsuficienteError(AssinaturaError):
     pass
 
 
-class AssinaturaPendenteError(AssinaturaError):
-    pass
+class CompraPendenteError(AssinaturaError):
+    """Ja existe uma compra do cliente aguardando pagamento."""
 
 
 def contratar_assinatura(db: Session, cliente_id: int, plano_marmitas: int) -> Assinatura:
@@ -143,12 +143,13 @@ def escolher_marmita(
     return ResultadoEscolha(escolha=escolha, saldo_restante=saldo_restante)
 
 
-def renovar_assinatura(db: Session, cliente_id: int, plano_marmitas: int) -> Assinatura:
+def renovar_assinatura(db: Session, cliente_id: int, plano_marmitas: int) -> CompraAssinatura:
     cliente = db.get(Cliente, cliente_id)
     if cliente is None:
         raise ClienteNaoEncontradoError(cliente_id)
 
-    # with_for_update trava a linha: duas renovacoes simultaneas nao se perdem.
+    # with_for_update trava a linha: duas renovacoes simultaneas do mesmo
+    # cliente sao atendidas uma de cada vez.
     assinatura = (
         db.query(Assinatura)
         .filter(Assinatura.cliente_id == cliente_id)
@@ -158,23 +159,34 @@ def renovar_assinatura(db: Session, cliente_id: int, plano_marmitas: int) -> Ass
     if assinatura is None:
         raise AssinaturaNaoEncontradaError(cliente_id)
 
-    # Pendente = ja existe uma compra aguardando pagamento.
-    if assinatura.status == STATUS_PENDENTE:
-        raise AssinaturaPendenteError(cliente_id)
-
-    # Sobras nao se perdem: o plano comprado e somado ao saldo atual.
-    assinatura.saldo_restante += plano_marmitas
-    assinatura.plano_marmitas = plano_marmitas
-    assinatura.status = STATUS_PENDENTE
-
-    db.add(
-        CompraAssinatura(
-            cliente_id=cliente_id,
-            plano_marmitas=plano_marmitas,
+    # So pode haver uma compra aguardando pagamento por cliente.
+    pendente = (
+        db.query(CompraAssinatura)
+        .filter(
+            CompraAssinatura.cliente_id == cliente_id,
+            CompraAssinatura.status_pagamento == COMPRA_PENDENTE,
         )
+        .first()
     )
+    if pendente is not None:
+        raise CompraPendenteError(cliente_id)
 
-    # Um unico commit: saldo, status e historico sao gravados juntos.
-    db.commit()
-    db.refresh(assinatura)
-    return assinatura
+    # A renovacao so registra a compra. Saldo, plano e status da assinatura
+    # mudam apenas quando o pagamento for confirmado: enquanto isso, uma
+    # assinatura Ativa continua usando as sobras normalmente.
+    compra = CompraAssinatura(
+        cliente_id=cliente_id,
+        plano_marmitas=plano_marmitas,
+        status_pagamento=COMPRA_PENDENTE,
+    )
+    db.add(compra)
+
+    try:
+        db.commit()
+    except IntegrityError:
+        # Indice unico do banco: barrou uma segunda compra Pendente.
+        db.rollback()
+        raise CompraPendenteError(cliente_id)
+
+    db.refresh(compra)
+    return compra
