@@ -40,17 +40,18 @@ Atue como Software Architect + Technical Mentor. Estou aprendendo arquitetura en
 - Swagger: http://127.0.0.1:8000/docs (F5 após mudanças; abrir o bloco certo da rota).
 - Banco: PostgreSQL `marmitas_db`, conexão via `DATABASE_URL` em `backend/.env` (no .gitignore).
 - Uso o Beekeeper Studio; `psql` NÃO está no PATH. Passe SQL para eu colar (o Run só mostra o resultado da ÚLTIMA consulta; para ver várias, uma por vez).
+- O `--reload` do Uvicorn às vezes TRAVA no Windows quando vários arquivos mudam em sequência (log mostra "Reloading..." sem "Started server process" depois) e o processo antigo segue servindo código velho. Antes de pedir teste, conferir no log que o reload terminou; se travou, reiniciar o servidor. Causa provável: conexão aberta do Swagger no navegador. Prática adotada: deixar o servidor DESLIGADO durante as edições e subir um novo só na hora dos testes.
 - Ignorar avisos "LF will be replaced by CRLF". BOM na linha 1 de .py aparecendo como "-/+" no diff é inofensivo.
 
 ## Estrutura
 ```
-database/   init.sql, seeds.sql, 002_compras_assinatura.sql
+database/   init.sql, seeds.sql, 002_compras_assinatura.sql, 003_status_pagamento_compras.sql
 backend/app/
   database.py   engine, SessionLocal, Base, get_db
   main.py       rotas
   models/       produto.py (Produto, PedidoAvulso, ItemPedidoAvulso), cliente.py, assinatura.py (Assinatura, EscolhaAssinante, CompraAssinatura)
   schemas/      pedido.py, assinatura.py
-  services/     cronograma.py, assinatura.py
+  services/     cronograma.py, assinatura.py, pedido.py
 ```
 - Não existe `__init__.py` (pacotes de namespace): não criar.
 - Imports RELATIVOS sempre (`from .models.cliente import Cliente` no main; `from ..database import Base` em models/schemas/services; `from .cronograma import ...` entre services). Nunca `from app...`.
@@ -68,7 +69,7 @@ routes (main.py) -> schemas -> services -> models/database
 Tabelas: produtos, clientes, pedidos_avulsos, itens_pedido_avulso, assinaturas, escolhas_assinante, compras_assinatura.
 - **assinaturas**: id, cliente_id (INT NOT NULL UNIQUE, FK clientes ON DELETE CASCADE), plano_marmitas INT NOT NULL, saldo_restante INT NOT NULL, status VARCHAR(20) NOT NULL DEFAULT 'Pendente', data_inicio TIMESTAMP. Um cliente tem no máximo UMA assinatura; renovar credita saldo na mesma linha.
 - **escolhas_assinante**: id, cliente_id (FK clientes ON DELETE CASCADE), produto_id (FK produtos, sem ondelete), quantidade INT NOT NULL DEFAULT 1, data_escolha. NÃO tem assinatura_id/status/ciclo/data de entrega. Relação com assinatura é indireta via cliente_id: NÃO criar relacionamento direto Assinatura -> EscolhaAssinante.
-- **compras_assinatura**: id, cliente_id (FK ON DELETE CASCADE), plano_marmitas, data_compra. Uma linha por compra de plano (inicial e cada renovação). Sem coluna de pagamento de propósito (pagamento manual, controlado pelo status). Quando houver pagamento no site, estender com ALTER TABLE; não preparar nada agora.
+- **compras_assinatura**: id, cliente_id (FK ON DELETE CASCADE), plano_marmitas, data_compra, status_pagamento ('Pendente' | 'Paga' | 'Cancelada', adicionada em `003_status_pagamento_compras.sql`). Uma linha por compra de plano (inicial e cada renovação). No máximo UMA compra Pendente por cliente (índice único parcial). Pagamento continua manual: eu confirmo pela API.
 - Produtos (todos ativos): ids 1-4 = ciclo 1, ids 5-8 = ciclo 2.
 
 ## Regras de negócio
@@ -76,36 +77,69 @@ Tabelas: produtos, clientes, pedidos_avulsos, itens_pedido_avulso, assinaturas, 
 2. Status: Pendente (aguardando pagamento), Ativa, Encerrada. Eu altero manualmente. Só Ativa escolhe marmitas.
 3. Saldo descontado na escolha; recusar se quantidade > saldo. Saldo 0 não encerra sozinho.
 4. Escolhas sem limite semanal, só o saldo manda. Produto precisa estar ativo e no ciclo atual.
-5. Ciclo (services/cronograma.py): semana ISO, paridade, fuso America/Sao_Paulo; seg-qui = ciclo da semana atual, sex-dom = da seguinte.
-6. Renovação: `POST /assinaturas/{cliente_id}/renovacoes` com `{"plano_marmitas": 12|16|20|24}`.
-   - Plano é SOMADO ao saldo atual; plano_marmitas passa a ser o último contratado.
-   - SEMPRE volta para Pendente (eu cobro e reativo manualmente). Enquanto Pendente, não escolhe marmitas.
-   - Ativa ou Encerrada pode renovar; Pendente -> 409; cliente inexistente ou sem assinatura -> 404.
-   - Grava linha em compras_assinatura no mesmo commit.
-7. Mapeamento de erros: 404 cliente/assinatura/produto inexistente; 409 assinatura não Ativa (ou Pendente na renovação); 422 produto inativo/fora do ciclo; 422 quantidade > saldo.
+5. Pedido avulso segue o MESMO cardápio: só aceita produto ativo e do ciclo atual (confirmado em 18/11/2026).
+6. Ciclo (services/cronograma.py): semana ISO, paridade, fuso America/Sao_Paulo; seg-qui = ciclo da semana atual, sex-dom = da seguinte.
+7. SALDO SÓ ENTRA QUANDO O PAGAMENTO É CONFIRMADO (decidido em 18/11/2026; substitui a regra antiga em que a renovação somava o saldo e voltava para Pendente). Motivo: cliente que renova e não paga não pode ganhar marmitas, nem perder as sobras já pagas.
+   | Ação | Compra | Saldo | Status da assinatura |
+   |---|---|---|---|
+   | Contratar (1ª vez) | nova, Pendente | 0 | Pendente |
+   | Renovar | nova, Pendente | não muda | não muda (Ativa continua escolhendo) |
+   | Confirmar pagamento | Pendente -> Paga | + plano | -> Ativa; plano_marmitas = plano pago |
+   | Cancelar compra | Pendente -> Cancelada | não muda | não muda; se a assinatura era Pendente (1ª compra) -> Encerrada |
+   - Renovar com compra Pendente em aberto -> 409. Cliente inexistente ou sem assinatura -> 404.
+   - Confirmar/cancelar sem compra Pendente -> 409.
+   - Compras anteriores a esta regra foram marcadas como Paga (o saldo delas já tinha sido somado).
+8. Mapeamento de erros: 404 cliente/assinatura/produto inexistente; 409 assinatura não Ativa (ou Pendente na renovação); 422 produto inativo/fora do ciclo; 422 quantidade > saldo.
 
 ## O que já funciona (testado no Swagger) — NÃO quebrar
 - `GET /` -> Online
 - `GET /marmitas-ativas` -> produtos ativos do ciclo atual
-- `POST /pedidos` -> 201, Pendente, frete fixo 10.00, previsão de entrega. Corpo: `{"cliente_id": 1, "itens": [{"produto_id": 5, "quantidade": 2}]}`
+- `POST /pedidos` -> 201, Pendente, frete fixo 10.00, previsão de entrega. Corpo: `{"cliente_id": 1, "itens": [{"produto_id": N, "quantidade": 2}]}` com N do ciclo ATUAL (ver GET /marmitas-ativas). Erros: 404 cliente; 404 produto; 422 produto inativo/fora do ciclo. Item inválido recusa o pedido inteiro (nada é gravado). Lógica em `services/pedido.py`.
 - `POST /assinaturas` -> `{"cliente_id": N, "plano_marmitas": 12}`. 201 Pendente com saldo = plano; 409 já tem; 404 cliente; 422 plano. Grava compra inicial.
-- `POST /assinaturas/{cliente_id}/escolhas` -> `{"produto_id": N, "quantidade": N}`. 201 com `{"escolha": {...}, "saldo_restante": N}`. Erros conforme regra 7; nenhum erro desconta saldo.
+- `POST /assinaturas/{cliente_id}/escolhas` -> `{"produto_id": N, "quantidade": N}`. 201 com `{"escolha": {...}, "saldo_restante": N}`. Erros conforme regra 8; nenhum erro desconta saldo.
 
-## Onde paramos (atualizado em 18/11/2026)
+## Onde paramos (atualizado em 18/11/2026, fim da sessão)
+RESUMO: bloco 17 quase pronto, falta só o 17g (testes finais + atualizar seções do CLAUDE.md). Commits da sessão de 18/11 ainda NÃO foram enviados ao GitHub (falta `git push`).
+
 Concluído: services `contratar_assinatura`, `escolher_marmita`, `renovar_assinatura`; schema `RenovacaoCreateSchema`.
 - **14c (feito, commit e898fe9):** rota `POST /assinaturas/{cliente_id}/renovacoes` no main.py (`criar_renovacao`).
 - **14d (feito, 18/11/2026):** testado no Swagger. Ativa -> 201 (saldo somado, plano atualizado, linha nova em compras_assinatura); Encerrada -> 201; Pendente -> 409; cliente 999 -> 404; plano 10 -> 422; escolhas depois de renovar -> 409; POST /pedidos -> 201.
 
-Próximo passo:
-- **15.** git push dos commits locais + commit deste arquivo.
-- Depois: definir comigo o próximo bloco de funcionalidades (ver pendências abaixo, ex.: validar cliente em POST /pedidos).
+- **15 (feito):** push da sessão de 18/11.
 
-Dados de teste (podem ter mudado, conferir no banco): cliente 1 = plano 12, saldo 22, Pendente; cliente 2 = plano 16, saldo 12, Pendente; cliente 3 = plano 20, saldo 32, Pendente. compras_assinatura com 5 linhas. Para testar escolhas de novo, reativar com `UPDATE assinaturas SET status = 'Ativa' WHERE cliente_id = N`.
+Bloco atual: arrumar POST /pedidos (passos 16a-16d).
+- **16a (feito, 3b26375):** `services/pedido.py` com `criar_pedido_avulso`, `ResultadoPedido`, exceções com prefixo `Pedido`.
+- **16b (feito, a202ebd):** rota POST /pedidos usa o service (comportamento idêntico, testado).
+- **16c (feito, e1fdea5 + 93c638e):** cliente inexistente -> 404 (testado).
+- **16d (feito):** produto inativo ou fora do ciclo -> 422 (testado, inclusive pedido com item bom + item ruim não grava nada).
+- Bloco 16 CONCLUÍDO.
+
+Bloco atual: pagamento das compras de assinatura (regra 7). Passos:
+- **17a (feito, c86d85d):** SQL `database/003_status_pagamento_compras.sql`, já executado no banco (5 compras antigas = Paga).
+- **17b (feito, d6c4c1a):** model CompraAssinatura com status_pagamento.
+- **17c (feito):** contratar_assinatura -> saldo 0, compra Pendente. Constantes COMPRA_PENDENTE/PAGA/CANCELADA em services/assinatura.py.
+- **17d (feito):** renovar_assinatura só cria compra Pendente (CompraPendenteError -> 409, inclusive se o índice único barrar). Rota de renovação agora devolve a COMPRA (CompraResponseSchema). AssinaturaPendenteError foi substituída por CompraPendenteError.
+- **17e (feito, testado):** `POST /assinaturas/{cliente_id}/confirmar-pagamento`, sem corpo, 200. Compra -> Paga; saldo += plano; plano_marmitas = plano; assinatura -> Ativa. Erros: 404 cliente/assinatura; 409 SemCompraPendenteError. Testado: renovar cliente 1 (compra Pendente, saldo intacto) -> confirmar (saldo 22 -> 34, Ativa) -> confirmar de novo 409 -> cliente 999 404.
+- **17f (feito, 6fb35b0, testado):** `POST /assinaturas/{cliente_id}/cancelar-compra`, sem corpo, 200. Compra -> Cancelada; saldo não muda; assinatura Pendente (1ª compra) -> Encerrada; senão status não muda. Erros 404/409. Confirmar e cancelar compartilham `_buscar_compra_pendente` no service.
+- **17g (PRÓXIMO):** testes que faltam: (a) renovar assinatura Encerrada (cliente 4) -> confirmar -> Ativa com saldo = plano; (b) escolher marmita com renovação Pendente em aberto (cliente 1 Ativa) -> 201, sobras continuam valendo; (c) reconfirmar a confirmação de pagamento após o refactor do `_buscar_compra_pendente`; (d) POST /pedidos 201. Depois, decidir comigo o que fazer com os clientes 2 e 3 (assinatura Pendente sem compra Pendente, sobra do modelo antigo: não conseguem ativar pela API). Então atualizar as seções "Regras" (2 e 8), "Banco" e "O que já funciona" para o modelo novo e fechar o bloco 17.
+- Depois: rota para encerrar assinatura Ativa (Ativa -> Encerrada), se eu quiser.
+
+Roteiro combinado (18/11/2026), nesta ordem:
+1. Terminar o bloco 17.
+2. Bloco de rotas GET: assinatura/saldo do cliente, compras pendentes, pedidos e escolhas da semana.
+3. Frontend começando pela parte do CLIENTE (cardápio da semana + fazer pedido), que não precisa de login. Decidir tecnologia comigo (HTML/JS simples ou React).
+4. Painel de admin junto com o login.
+- Pendência de segurança (OBRIGATÓRIA antes de publicar na internet): rotas de admin (confirmar/cancelar) não têm login.
+- Limpeza opcional: import `calcular_data_entrega_pedido` sem uso no main.py.
+
+Dados de teste em 18/11/2026 16:50 (conferir no banco): cliente 1 = plano 12, saldo 34, Ativa; cliente 2 = plano 16, saldo 12, Pendente; cliente 3 = plano 20, saldo 32, Pendente; cliente 4 ("Cliente Teste 4", criado direto no banco) = plano 12, saldo 0, Encerrada. compras_assinatura: 8 linhas (ids 1-6 Paga, 7 e 8 Cancelada), nenhuma Pendente. Ainda não existe rota para cadastrar cliente.
 
 ## Pendências conhecidas (NÃO mexer sem eu pedir)
 1. `database/init.sql` desatualizado: falta coluna `ciclo_cardapio` em produtos; `produtos.ativo` DEFAULT FALSE no SQL vs default=True no modelo. Resolver com SQL complementar (padrão 00N_*.sql).
-2. `POST /pedidos` não valida cliente_id: cliente inexistente gera 500 (FK) em vez de 404. Reaproveitar a verificação do service de assinaturas.
+2. (Resolvida em 18/11/2026: POST /pedidos valida cliente -> 404.)
 3. `PedidoAvulso.cliente_id` sem ondelete e `Cliente.pedidos_avulsos` sem cascade (SQL tem ON DELETE CASCADE). Sem efeito hoje.
-4. Estética: espaços sobrando após `db.add(nova)` em contratar_assinatura; arquivos sem newline no fim.
+4. Estética: arquivos sem newline no fim. (Os espaços sobrando após `db.add(nova)` saíram no 17c.)
 5. Pagamento no site: estender compras_assinatura quando existir.
 6. Dados de teste inconsistentes (cliente 2 plano 16 saldo 12). Sem efeito.
+7. Exceções comuns repetidas entre services (cliente/produto não encontrado). Hoje as de pedido levam prefixo `Pedido` para não colidir com as de assinatura. Futuro: juntar num `services/erros.py`.
+8. Ideia (não pedida ainda): "modo cardápio completo" para liberar os dois ciclos numa semana especial, via configuração, sem mexer em `ciclo_cardapio`.
