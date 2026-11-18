@@ -47,6 +47,7 @@ from .services.assinatura import (
 
 from .services.pedido import (
     criar_pedido_avulso,
+    PedidoClienteNaoEncontradoError,
     PedidoProdutoNaoEncontradoError,
 )
 
@@ -75,6 +76,8 @@ def listar_marmitas_ativas(db: Session = Depends(get_db)):
 def criar_pedido(payload: PedidoCreateSchema, db: Session = Depends(get_db)):
     try:
         resultado = criar_pedido_avulso(db, payload.cliente_id, payload.itens)
+    except PedidoClienteNaoEncontradoError as erro:
+        raise HTTPException(status_code=404, detail=f"Cliente com ID {erro.cliente_id} não encontrado.")
     except PedidoProdutoNaoEncontradoError as erro:
         raise HTTPException(status_code=404, detail=f"Marmita com ID {erro.produto_id} não encontrada.")
 
