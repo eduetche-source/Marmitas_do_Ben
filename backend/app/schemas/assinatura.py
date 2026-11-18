@@ -44,3 +44,13 @@ class EscolhaRealizadaSchema(BaseModel):
 
 class RenovacaoCreateSchema(BaseModel):
     plano_marmitas: Literal[12, 16, 20, 24]
+
+
+class CompraResponseSchema(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    cliente_id: int
+    plano_marmitas: int
+    status_pagamento: str
+    data_compra: Optional[datetime] = None
