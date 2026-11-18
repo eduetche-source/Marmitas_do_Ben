@@ -3,6 +3,7 @@ from datetime import datetime
 
 from sqlalchemy.orm import Session
 
+from ..models.cliente import Cliente
 from ..models.produto import Produto, PedidoAvulso, ItemPedidoAvulso
 from .cronograma import calcular_data_entrega_pedido
 
@@ -12,6 +13,12 @@ VALOR_FRETE = 10.00
 
 class PedidoError(Exception):
     """Base das excecoes de dominio do modulo de pedidos avulsos."""
+
+
+class PedidoClienteNaoEncontradoError(PedidoError):
+    def __init__(self, cliente_id: int):
+        super().__init__(cliente_id)
+        self.cliente_id = cliente_id
 
 
 class PedidoProdutoNaoEncontradoError(PedidoError):
@@ -27,6 +34,12 @@ class ResultadoPedido:
 
 
 def criar_pedido_avulso(db: Session, cliente_id: int, itens: list) -> ResultadoPedido:
+    # Valida o cliente antes de gravar: sem isso, o erro so apareceria
+    # no commit (violacao de FK) e viraria HTTP 500.
+    cliente = db.get(Cliente, cliente_id)
+    if cliente is None:
+        raise PedidoClienteNaoEncontradoError(cliente_id)
+
     # O cronograma calcula a previsao de entrega exibida ao cliente.
     data_entrega_prevista = calcular_data_entrega_pedido()
 
