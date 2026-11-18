@@ -44,6 +44,8 @@ from .services.assinatura import (
     escolher_marmita,
     renovar_assinatura,
     CompraPendenteError,
+    confirmar_pagamento,
+    SemCompraPendenteError,
 )
 
 from .services.pedido import (
@@ -140,3 +142,18 @@ def criar_renovacao(cliente_id: int, payload: RenovacaoCreateSchema, db: Session
         raise HTTPException(status_code=404, detail="Este cliente não possui assinatura.")
     except CompraPendenteError:
         raise HTTPException(status_code=409, detail="Já existe uma compra aguardando pagamento.")
+
+
+@app.post(
+    "/assinaturas/{cliente_id}/confirmar-pagamento",
+    response_model=AssinaturaResponseSchema,
+)
+def criar_confirmacao_pagamento(cliente_id: int, db: Session = Depends(get_db)):
+    try:
+        return confirmar_pagamento(db, cliente_id)
+    except ClienteNaoEncontradoError:
+        raise HTTPException(status_code=404, detail=f"Cliente com ID {cliente_id} não encontrado.")
+    except AssinaturaNaoEncontradaError:
+        raise HTTPException(status_code=404, detail="Este cliente não possui assinatura.")
+    except SemCompraPendenteError:
+        raise HTTPException(status_code=409, detail="Não há compra aguardando pagamento.")

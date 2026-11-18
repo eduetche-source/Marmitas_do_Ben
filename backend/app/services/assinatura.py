@@ -54,6 +54,10 @@ class CompraPendenteError(AssinaturaError):
     """Ja existe uma compra do cliente aguardando pagamento."""
 
 
+class SemCompraPendenteError(AssinaturaError):
+    """Nao ha compra do cliente aguardando pagamento."""
+
+
 def contratar_assinatura(db: Session, cliente_id: int, plano_marmitas: int) -> Assinatura:
     cliente = db.get(Cliente, cliente_id)
     if cliente is None:
@@ -190,3 +194,43 @@ def renovar_assinatura(db: Session, cliente_id: int, plano_marmitas: int) -> Com
 
     db.refresh(compra)
     return compra
+
+
+def confirmar_pagamento(db: Session, cliente_id: int) -> Assinatura:
+    cliente = db.get(Cliente, cliente_id)
+    if cliente is None:
+        raise ClienteNaoEncontradoError(cliente_id)
+
+    # with_for_update trava a assinatura: duas confirmacoes simultaneas
+    # nao creditam o mesmo plano duas vezes.
+    assinatura = (
+        db.query(Assinatura)
+        .filter(Assinatura.cliente_id == cliente_id)
+        .with_for_update()
+        .first()
+    )
+    if assinatura is None:
+        raise AssinaturaNaoEncontradaError(cliente_id)
+
+    compra = (
+        db.query(CompraAssinatura)
+        .filter(
+            CompraAssinatura.cliente_id == cliente_id,
+            CompraAssinatura.status_pagamento == COMPRA_PENDENTE,
+        )
+        .first()
+    )
+    if compra is None:
+        raise SemCompraPendenteError(cliente_id)
+
+    # Pagamento confirmado: so agora o plano entra no saldo.
+    # Sobras nao se perdem: o plano e somado ao saldo atual.
+    compra.status_pagamento = COMPRA_PAGA
+    assinatura.saldo_restante += compra.plano_marmitas
+    assinatura.plano_marmitas = compra.plano_marmitas
+    assinatura.status = STATUS_ATIVA
+
+    # Um unico commit: compra e assinatura sao gravadas juntas.
+    db.commit()
+    db.refresh(assinatura)
+    return assinatura
