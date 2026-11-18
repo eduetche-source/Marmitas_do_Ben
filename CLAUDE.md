@@ -6,12 +6,16 @@ Atue como Software Architect + Technical Mentor. Estou aprendendo arquitetura en
 ## Início de cada sessão
 1. A FONTE DA VERDADE É O CÓDIGO, não este arquivo. Antes de propor código, leia os arquivos relevantes e rode `git --no-pager log -8 --oneline` e `git --no-pager status -sb`.
 2. Compare com a seção "Onde paramos" abaixo e me diga em 2-3 linhas o estado real e qual é o próximo passo. Não escreva código ainda.
-3. Ao fim de cada passo concluído, atualize a seção "Onde paramos" (e o resto deste arquivo, se algo mudou), para a próxima sessão já começar certa.
+3. Ao fim de cada passo concluído, atualize a seção "Onde paramos" (e regras/fluxo na hora em que mudarem), SEM commitar.
+4. No fim da sessão: um único commit `docs: atualiza CLAUDE.md (...)` e, se eu quiser, o push.
 
 ## Como trabalhar comigo
 - Um passo por vez. Mande SÓ o próximo passo e espere eu confirmar antes do seguinte. Nunca encadeie passos.
 - Comandos exatos para Windows PowerShell (bloco copiável). Git sempre com `git --no-pager ...`.
-- Edição de arquivos: por padrão me dê NOME DO ARQUIVO + TRECHO EXATO para eu editar no VS Code. Só edite direto se eu pedir.
+- Fluxo (decidido em 18/11/2026): o Claude edita os arquivos, roda os comandos e faz os commits; eu supervisiono e dou OK em cada passo.
+  - Cada passo: explicar o que vai fazer e por quê -> editar -> mostrar o diff -> eu testo/confiro e dou OK -> commit.
+  - Comandos que exigem um terminal ocupado (Uvicorn) ou ferramentas fora do PATH (Beekeeper/SQL) continuam comigo: me passe o comando/SQL exato.
+  - Push só quando eu pedir.
   - `main.py` tem acentos (UTF-8): salvar como UTF-8, não mexer nas linhas antigas.
   - `services/assinatura.py`: escrever SEM acentos (comentários e textos).
 - Explique brevemente o POR QUÊ e onde fica cada responsabilidade, sem aula teórica. Se eu perguntar "qual comando eu rodo?", responda direto.
@@ -19,7 +23,7 @@ Atue como Software Architect + Technical Mentor. Estou aprendendo arquitetura en
 - Não invente campos que não existem no banco. Regra de negócio não definida: pergunte antes.
 - Quando eu mandar um erro: (1) interprete, (2) causa provável, (3) o que verificar, (4) só então proponha alteração.
 - Depois de editar, conferir com `git --no-pager diff` antes do commit (acréscimo = só linhas "+").
-- Commits pequenos, arquivo por arquivo (nunca `git add .`), um commit por mudança independente. Mensagens no padrão `feat: ...` / `docs: ...` em português. Não commitar nem dar push sem eu pedir.
+- Commits pequenos, arquivo por arquivo (nunca `git add .`), um commit por mudança independente. Mensagens no padrão `feat: ...` / `docs: ...` em português. Commit só depois do meu OK; push só quando eu pedir.
 - Não recomece o projeto nem troque a arquitetura.
 
 ## Ambiente
@@ -88,14 +92,15 @@ Tabelas: produtos, clientes, pedidos_avulsos, itens_pedido_avulso, assinaturas, 
 - `POST /assinaturas/{cliente_id}/escolhas` -> `{"produto_id": N, "quantidade": N}`. 201 com `{"escolha": {...}, "saldo_restante": N}`. Erros conforme regra 7; nenhum erro desconta saldo.
 
 ## Onde paramos (atualizado em 18/11/2026)
-Concluído e no GitHub: services `contratar_assinatura`, `escolher_marmita`, `renovar_assinatura` (este SEM rota e sem teste); schema `RenovacaoCreateSchema`.
+Concluído: services `contratar_assinatura`, `escolher_marmita`, `renovar_assinatura`; schema `RenovacaoCreateSchema`.
+- **14c (feito, commit e898fe9):** rota `POST /assinaturas/{cliente_id}/renovacoes` no main.py (`criar_renovacao`).
+- **14d (feito, 18/11/2026):** testado no Swagger. Ativa -> 201 (saldo somado, plano atualizado, linha nova em compras_assinatura); Encerrada -> 201; Pendente -> 409; cliente 999 -> 404; plano 10 -> 422; escolhas depois de renovar -> 409; POST /pedidos -> 201.
 
 Próximo passo:
-- **14c.** Rota `POST /assinaturas/{cliente_id}/renovacoes` no main.py: status_code=201, response_model=AssinaturaResponseSchema, corpo RenovacaoCreateSchema. Imports novos: RenovacaoCreateSchema (schemas), renovar_assinatura e AssinaturaPendenteError (services). Tradução: ClienteNaoEncontradoError -> 404; AssinaturaNaoEncontradaError -> 404; AssinaturaPendenteError -> 409 ("Já existe uma compra aguardando pagamento."). Duas linhas em branco entre rotas; decorador colado no def.
-- **14d.** Testes no Swagger: renovar cliente 1 (Ativa) -> 201, Pendente, saldo somado, plano atualizado, nova linha em compras_assinatura (SELECT no Beekeeper); renovar de novo -> 409; cliente 2 (Pendente) -> 409; cliente 999 -> 404; plano 10 -> 422; escolhas do cliente 1 depois de renovar -> 409. Testar Encerrada com `UPDATE assinaturas SET status = 'Encerrada' WHERE cliente_id = N`. Reconfirmar POST /pedidos 201.
-- **15.** git push e atualizar este arquivo.
+- **15.** git push dos commits locais + commit deste arquivo.
+- Depois: definir comigo o próximo bloco de funcionalidades (ver pendências abaixo, ex.: validar cliente em POST /pedidos).
 
-Dados de teste (podem ter mudado, conferir no banco): cliente 1 = plano 12, Ativa, saldo 10; cliente 2 = plano 16, saldo 12, Pendente; cliente 3 = plano 12, saldo 12, Pendente.
+Dados de teste (podem ter mudado, conferir no banco): cliente 1 = plano 12, saldo 22, Pendente; cliente 2 = plano 16, saldo 12, Pendente; cliente 3 = plano 20, saldo 32, Pendente. compras_assinatura com 5 linhas. Para testar escolhas de novo, reativar com `UPDATE assinaturas SET status = 'Ativa' WHERE cliente_id = N`.
 
 ## Pendências conhecidas (NÃO mexer sem eu pedir)
 1. `database/init.sql` desatualizado: falta coluna `ciclo_cardapio` em produtos; `produtos.ativo` DEFAULT FALSE no SQL vs default=True no modelo. Resolver com SQL complementar (padrão 00N_*.sql).
