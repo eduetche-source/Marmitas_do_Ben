@@ -126,6 +126,14 @@ class CompraAssinatura(Base):
         nullable=True,
     )
 
+    # Situacao do pagamento: 'Pendente', 'Paga' ou 'Cancelada'.
+    # O saldo da assinatura so e creditado quando a compra vira 'Paga'.
+    status_pagamento = Column(
+        String(20),
+        nullable=False,
+        default="Pendente",
+    )
+
     cliente = relationship(
         "Cliente",
         back_populates="compras_assinatura",
