@@ -49,6 +49,7 @@ from .services.pedido import (
     criar_pedido_avulso,
     PedidoClienteNaoEncontradoError,
     PedidoProdutoNaoEncontradoError,
+    PedidoProdutoForaDoCicloError,
 )
 
 app = FastAPI(title="Marmitas do Ben API")
@@ -80,6 +81,8 @@ def criar_pedido(payload: PedidoCreateSchema, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail=f"Cliente com ID {erro.cliente_id} não encontrado.")
     except PedidoProdutoNaoEncontradoError as erro:
         raise HTTPException(status_code=404, detail=f"Marmita com ID {erro.produto_id} não encontrada.")
+    except PedidoProdutoForaDoCicloError as erro:
+        raise HTTPException(status_code=422, detail=f"A marmita com ID {erro.produto_id} não está disponível no cardápio atual.")
 
     return {
         "mensagem": "Pedido realizado com sucesso!",
