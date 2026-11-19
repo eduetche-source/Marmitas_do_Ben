@@ -1,4 +1,5 @@
 ﻿from dataclasses import dataclass
+from typing import Optional
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -147,6 +148,41 @@ def escolher_marmita(
     return ResultadoEscolha(escolha=escolha, saldo_restante=saldo_restante)
 
 
+def _consultar_compra_pendente(db: Session, cliente_id: int) -> Optional[CompraAssinatura]:
+    """Devolve a compra do cliente aguardando pagamento, ou None.
+    Pelo indice unico do banco, existe no maximo uma."""
+    return (
+        db.query(CompraAssinatura)
+        .filter(
+            CompraAssinatura.cliente_id == cliente_id,
+            CompraAssinatura.status_pagamento == COMPRA_PENDENTE,
+        )
+        .first()
+    )
+
+
+@dataclass
+class ResultadoConsultaAssinatura:
+    assinatura: Assinatura
+    compra_pendente: Optional[CompraAssinatura]
+
+
+def consultar_assinatura(db: Session, cliente_id: int) -> ResultadoConsultaAssinatura:
+    # Somente leitura: nao trava nada e nao faz commit.
+    cliente = db.get(Cliente, cliente_id)
+    if cliente is None:
+        raise ClienteNaoEncontradoError(cliente_id)
+
+    assinatura = db.query(Assinatura).filter(Assinatura.cliente_id == cliente_id).first()
+    if assinatura is None:
+        raise AssinaturaNaoEncontradaError(cliente_id)
+
+    return ResultadoConsultaAssinatura(
+        assinatura=assinatura,
+        compra_pendente=_consultar_compra_pendente(db, cliente_id),
+    )
+
+
 def renovar_assinatura(db: Session, cliente_id: int, plano_marmitas: int) -> CompraAssinatura:
     cliente = db.get(Cliente, cliente_id)
     if cliente is None:
@@ -164,15 +200,7 @@ def renovar_assinatura(db: Session, cliente_id: int, plano_marmitas: int) -> Com
         raise AssinaturaNaoEncontradaError(cliente_id)
 
     # So pode haver uma compra aguardando pagamento por cliente.
-    pendente = (
-        db.query(CompraAssinatura)
-        .filter(
-            CompraAssinatura.cliente_id == cliente_id,
-            CompraAssinatura.status_pagamento == COMPRA_PENDENTE,
-        )
-        .first()
-    )
-    if pendente is not None:
+    if _consultar_compra_pendente(db, cliente_id) is not None:
         raise CompraPendenteError(cliente_id)
 
     # A renovacao so registra a compra. Saldo, plano e status da assinatura
@@ -214,14 +242,7 @@ def _buscar_compra_pendente(db: Session, cliente_id: int) -> tuple[Assinatura, C
     if assinatura is None:
         raise AssinaturaNaoEncontradaError(cliente_id)
 
-    compra = (
-        db.query(CompraAssinatura)
-        .filter(
-            CompraAssinatura.cliente_id == cliente_id,
-            CompraAssinatura.status_pagamento == COMPRA_PENDENTE,
-        )
-        .first()
-    )
+    compra = _consultar_compra_pendente(db, cliente_id)
     if compra is None:
         raise SemCompraPendenteError(cliente_id)
 

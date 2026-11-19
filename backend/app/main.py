@@ -25,6 +25,7 @@ from .schemas.assinatura import (
     EscolhaRealizadaSchema,
     RenovacaoCreateSchema,
     CompraResponseSchema,
+    AssinaturaDetalheSchema,
 )
 
 from .services.cronograma import (
@@ -47,6 +48,7 @@ from .services.assinatura import (
     confirmar_pagamento,
     SemCompraPendenteError,
     cancelar_compra,
+    consultar_assinatura,
 )
 
 from .services.pedido import (
@@ -105,6 +107,16 @@ def criar_assinatura(payload: AssinaturaCreateSchema, db: Session = Depends(get_
         raise HTTPException(status_code=404, detail=f"Cliente com ID {payload.cliente_id} não encontrado.")
     except AssinaturaJaExisteError:
         raise HTTPException(status_code=409, detail="Este cliente já possui uma assinatura.")
+
+
+@app.get("/assinaturas/{cliente_id}", response_model=AssinaturaDetalheSchema)
+def obter_assinatura(cliente_id: int, db: Session = Depends(get_db)):
+    try:
+        return consultar_assinatura(db, cliente_id)
+    except ClienteNaoEncontradoError:
+        raise HTTPException(status_code=404, detail=f"Cliente com ID {cliente_id} não encontrado.")
+    except AssinaturaNaoEncontradaError:
+        raise HTTPException(status_code=404, detail="Este cliente não possui assinatura.")
 
 
 @app.post(
