@@ -67,14 +67,14 @@ routes (main.py) -> schemas -> services -> models/database
 
 ## Banco
 Tabelas: produtos, clientes, pedidos_avulsos, itens_pedido_avulso, assinaturas, escolhas_assinante, compras_assinatura.
-- **assinaturas**: id, cliente_id (INT NOT NULL UNIQUE, FK clientes ON DELETE CASCADE), plano_marmitas INT NOT NULL, saldo_restante INT NOT NULL, status VARCHAR(20) NOT NULL DEFAULT 'Pendente', data_inicio TIMESTAMP. Um cliente tem no máximo UMA assinatura; renovar credita saldo na mesma linha.
+- **assinaturas**: id, cliente_id (INT NOT NULL UNIQUE, FK clientes ON DELETE CASCADE), plano_marmitas INT NOT NULL, saldo_restante INT NOT NULL, status VARCHAR(20) NOT NULL DEFAULT 'Pendente', data_inicio TIMESTAMP. Um cliente tem no máximo UMA assinatura; renovar NÃO cria outra: gera uma compra, e o saldo é creditado na mesma linha quando o pagamento é confirmado.
 - **escolhas_assinante**: id, cliente_id (FK clientes ON DELETE CASCADE), produto_id (FK produtos, sem ondelete), quantidade INT NOT NULL DEFAULT 1, data_escolha. NÃO tem assinatura_id/status/ciclo/data de entrega. Relação com assinatura é indireta via cliente_id: NÃO criar relacionamento direto Assinatura -> EscolhaAssinante.
 - **compras_assinatura**: id, cliente_id (FK ON DELETE CASCADE), plano_marmitas, data_compra, status_pagamento ('Pendente' | 'Paga' | 'Cancelada', adicionada em `003_status_pagamento_compras.sql`). Uma linha por compra de plano (inicial e cada renovação). No máximo UMA compra Pendente por cliente (índice único parcial). Pagamento continua manual: eu confirmo pela API.
 - Produtos (todos ativos): ids 1-4 = ciclo 1, ids 5-8 = ciclo 2.
 
 ## Regras de negócio
 1. Planos: 12, 16, 20 ou 24 marmitas (validados no schema).
-2. Status: Pendente (aguardando pagamento), Ativa, Encerrada. Eu altero manualmente. Só Ativa escolhe marmitas.
+2. Status da assinatura: Pendente (1ª compra ainda não paga), Ativa, Encerrada. Muda pelas rotas de confirmar pagamento / cancelar compra (regra 7), não mais à mão no banco. Só Ativa escolhe marmitas.
 3. Saldo descontado na escolha; recusar se quantidade > saldo. Saldo 0 não encerra sozinho.
 4. Escolhas sem limite semanal, só o saldo manda. Produto precisa estar ativo e no ciclo atual.
 5. Pedido avulso segue o MESMO cardápio: só aceita produto ativo e do ciclo atual (confirmado em 18/11/2026).
@@ -89,50 +89,43 @@ Tabelas: produtos, clientes, pedidos_avulsos, itens_pedido_avulso, assinaturas, 
    - Renovar com compra Pendente em aberto -> 409. Cliente inexistente ou sem assinatura -> 404.
    - Confirmar/cancelar sem compra Pendente -> 409.
    - Compras anteriores a esta regra foram marcadas como Paga (o saldo delas já tinha sido somado).
-8. Mapeamento de erros: 404 cliente/assinatura/produto inexistente; 409 assinatura não Ativa (ou Pendente na renovação); 422 produto inativo/fora do ciclo; 422 quantidade > saldo.
+8. Mapeamento de erros: 404 cliente/assinatura/produto inexistente; 409 conflito de estado (assinatura não Ativa ao escolher; já existe compra Pendente ao renovar; não há compra Pendente ao confirmar/cancelar; cliente já tem assinatura); 422 produto inativo/fora do ciclo; 422 quantidade > saldo; 422 dados inválidos (Pydantic).
 
 ## O que já funciona (testado no Swagger) — NÃO quebrar
 - `GET /` -> Online
 - `GET /marmitas-ativas` -> produtos ativos do ciclo atual
 - `POST /pedidos` -> 201, Pendente, frete fixo 10.00, previsão de entrega. Corpo: `{"cliente_id": 1, "itens": [{"produto_id": N, "quantidade": 2}]}` com N do ciclo ATUAL (ver GET /marmitas-ativas). Erros: 404 cliente; 404 produto; 422 produto inativo/fora do ciclo. Item inválido recusa o pedido inteiro (nada é gravado). Lógica em `services/pedido.py`.
-- `POST /assinaturas` -> `{"cliente_id": N, "plano_marmitas": 12}`. 201 Pendente com saldo = plano; 409 já tem; 404 cliente; 422 plano. Grava compra inicial.
-- `POST /assinaturas/{cliente_id}/escolhas` -> `{"produto_id": N, "quantidade": N}`. 201 com `{"escolha": {...}, "saldo_restante": N}`. Erros conforme regra 8; nenhum erro desconta saldo.
+- `POST /assinaturas` -> `{"cliente_id": N, "plano_marmitas": 12}`. 201 Pendente com saldo 0 + compra Pendente; 409 já tem; 404 cliente; 422 plano.
+- `POST /assinaturas/{cliente_id}/escolhas` -> `{"produto_id": N, "quantidade": N}`. 201 com `{"escolha": {...}, "saldo_restante": N}`. Funciona também com renovação Pendente em aberto (usa as sobras). Erros conforme regra 8; nenhum erro desconta saldo.
+- `POST /assinaturas/{cliente_id}/renovacoes` -> `{"plano_marmitas": 12}`. 201 com a COMPRA Pendente (saldo/status não mudam); 409 se já há compra Pendente; 404 cliente/assinatura; 422 plano.
+- `POST /assinaturas/{cliente_id}/confirmar-pagamento` (sem corpo) -> 200 com a assinatura: compra Paga, saldo += plano, plano atualizado, Ativa (também reativa Encerrada). 409 sem compra Pendente; 404.
+- `POST /assinaturas/{cliente_id}/cancelar-compra` (sem corpo) -> 200 com a assinatura: compra Cancelada, saldo intacto; 1ª compra (Pendente) -> Encerrada. 409 sem compra Pendente; 404.
+- `GET /assinaturas/{cliente_id}` -> 200 `{"assinatura": {...}, "compra_pendente": {...} | null}`; 404 cliente/assinatura.
+- Rotas de confirmar/cancelar são de ADMIN e ainda não têm login (ver pendência de segurança).
 
-## Onde paramos (atualizado em 18/11/2026, fim da sessão)
-RESUMO: bloco 17 quase pronto, falta só o 17g (testes finais + atualizar seções do CLAUDE.md). Push feito em 18/11 às 19:35 (GitHub em dia até cdc393d). Pendente: decidir clientes 2 e 3 (recomendei marcar como Ativa no banco).
+## Onde paramos (atualizado em 19/11/2026)
+RESUMO: blocos 14 a 17 CONCLUÍDOS e testados. Próximo: bloco 18 (rotas GET). Detalhes de cada passo antigo estão no `git log`.
 
-Concluído: services `contratar_assinatura`, `escolher_marmita`, `renovar_assinatura`; schema `RenovacaoCreateSchema`.
-- **14c (feito, commit e898fe9):** rota `POST /assinaturas/{cliente_id}/renovacoes` no main.py (`criar_renovacao`).
-- **14d (feito, 18/11/2026):** testado no Swagger. Ativa -> 201 (saldo somado, plano atualizado, linha nova em compras_assinatura); Encerrada -> 201; Pendente -> 409; cliente 999 -> 404; plano 10 -> 422; escolhas depois de renovar -> 409; POST /pedidos -> 201.
-
-- **15 (feito):** push da sessão de 18/11.
-
-Bloco atual: arrumar POST /pedidos (passos 16a-16d).
-- **16a (feito, 3b26375):** `services/pedido.py` com `criar_pedido_avulso`, `ResultadoPedido`, exceções com prefixo `Pedido`.
-- **16b (feito, a202ebd):** rota POST /pedidos usa o service (comportamento idêntico, testado).
-- **16c (feito, e1fdea5 + 93c638e):** cliente inexistente -> 404 (testado).
-- **16d (feito):** produto inativo ou fora do ciclo -> 422 (testado, inclusive pedido com item bom + item ruim não grava nada).
-- Bloco 16 CONCLUÍDO.
-
-Bloco atual: pagamento das compras de assinatura (regra 7). Passos:
-- **17a (feito, c86d85d):** SQL `database/003_status_pagamento_compras.sql`, já executado no banco (5 compras antigas = Paga).
-- **17b (feito, d6c4c1a):** model CompraAssinatura com status_pagamento.
-- **17c (feito):** contratar_assinatura -> saldo 0, compra Pendente. Constantes COMPRA_PENDENTE/PAGA/CANCELADA em services/assinatura.py.
-- **17d (feito):** renovar_assinatura só cria compra Pendente (CompraPendenteError -> 409, inclusive se o índice único barrar). Rota de renovação agora devolve a COMPRA (CompraResponseSchema). AssinaturaPendenteError foi substituída por CompraPendenteError.
-- **17e (feito, testado):** `POST /assinaturas/{cliente_id}/confirmar-pagamento`, sem corpo, 200. Compra -> Paga; saldo += plano; plano_marmitas = plano; assinatura -> Ativa. Erros: 404 cliente/assinatura; 409 SemCompraPendenteError. Testado: renovar cliente 1 (compra Pendente, saldo intacto) -> confirmar (saldo 22 -> 34, Ativa) -> confirmar de novo 409 -> cliente 999 404.
-- **17f (feito, 6fb35b0, testado):** `POST /assinaturas/{cliente_id}/cancelar-compra`, sem corpo, 200. Compra -> Cancelada; saldo não muda; assinatura Pendente (1ª compra) -> Encerrada; senão status não muda. Erros 404/409. Confirmar e cancelar compartilham `_buscar_compra_pendente` no service.
-- **17g (PRÓXIMO):** testes que faltam: (a) renovar assinatura Encerrada (cliente 4) -> confirmar -> Ativa com saldo = plano; (b) escolher marmita com renovação Pendente em aberto (cliente 1 Ativa) -> 201, sobras continuam valendo; (c) reconfirmar a confirmação de pagamento após o refactor do `_buscar_compra_pendente`; (d) POST /pedidos 201. Depois, decidir comigo o que fazer com os clientes 2 e 3 (assinatura Pendente sem compra Pendente, sobra do modelo antigo: não conseguem ativar pela API). Então atualizar as seções "Regras" (2 e 8), "Banco" e "O que já funciona" para o modelo novo e fechar o bloco 17.
-- Depois: rota para encerrar assinatura Ativa (Ativa -> Encerrada), se eu quiser.
+Histórico curto:
+- Bloco 14 (renovação) e 15 (push): 18/11.
+- Bloco 16 (POST /pedidos): lógica movida para `services/pedido.py`; valida cliente (404) e cardápio atual (422).
+- Bloco 17 (pagamento das compras, regra 7): coluna `status_pagamento` (SQL 003), contratar com saldo 0, renovar só cria compra Pendente, rotas confirmar-pagamento e cancelar-compra (compartilham `_buscar_compra_pendente`). Testes finais 17g OK em 19/11: Encerrada renova e volta Ativa ao confirmar; escolha funciona com renovação em aberto; POST /pedidos 201. Clientes 2 e 3 (sobra do modelo antigo) marcados como Ativa no banco em 19/11.
 
 Roteiro combinado (18/11/2026), nesta ordem:
-1. Terminar o bloco 17.
-2. Bloco de rotas GET: assinatura/saldo do cliente, compras pendentes, pedidos e escolhas da semana.
+1. ~~Terminar o bloco 17.~~ (feito em 19/11)
+2. **Bloco 18 (EM ANDAMENTO): rotas GET** (as 4 aprovadas em 19/11):
+   - **18a (feito, 394ada8 + 14441d0, testado):** `GET /assinaturas/{cliente_id}` -> `{"assinatura": {...}, "compra_pendente": {...} | null}`. Service `consultar_assinatura` (só leitura). Extraído `_consultar_compra_pendente`, usado também por renovar e `_buscar_compra_pendente` (renovar/confirmar retestados).
+   - **18b (PRÓXIMO):** `GET /assinaturas/{cliente_id}/compras` — histórico de compras do cliente.
+   - **18c:** `GET /compras-pendentes` — todas as compras aguardando pagamento (admin).
+   - **18d:** `GET /producao-da-semana` — soma de escolhas + pedidos avulsos por produto. ANTES: decidir comigo o que conta como "semana" (ex.: feitos de sexta a quinta, entregues na segunda seguinte).
 3. Frontend começando pela parte do CLIENTE (cardápio da semana + fazer pedido), que não precisa de login. Decidir tecnologia comigo (HTML/JS simples ou React).
 4. Painel de admin junto com o login.
 - Pendência de segurança (OBRIGATÓRIA antes de publicar na internet): rotas de admin (confirmar/cancelar) não têm login.
+- Talvez: rota para encerrar assinatura Ativa (Ativa -> Encerrada), se eu quiser.
+- Talvez: rota para cadastrar cliente (hoje só direto no banco).
 - Limpeza opcional: import `calcular_data_entrega_pedido` sem uso no main.py.
 
-Dados de teste em 18/11/2026 16:50 (conferir no banco): cliente 1 = plano 12, saldo 34, Ativa; cliente 2 = plano 16, saldo 12, Pendente; cliente 3 = plano 20, saldo 32, Pendente; cliente 4 ("Cliente Teste 4", criado direto no banco) = plano 12, saldo 0, Encerrada. compras_assinatura: 8 linhas (ids 1-6 Paga, 7 e 8 Cancelada), nenhuma Pendente. Ainda não existe rota para cadastrar cliente.
+Dados de teste em 19/11/2026 (conferir no banco): todas as assinaturas Ativa — cliente 1 = plano 20, saldo 52; cliente 2 = plano 12, saldo 24 (renovou e pagou no teste do 18a); cliente 3 = plano 20, saldo 32; cliente 4 ("Cliente Teste 4", criado direto no banco) = plano 12, saldo 12. compras_assinatura: 11 linhas, nenhuma Pendente.
 
 ## Pendências conhecidas (NÃO mexer sem eu pedir)
 1. `database/init.sql` desatualizado: falta coluna `ciclo_cardapio` em produtos; `produtos.ativo` DEFAULT FALSE no SQL vs default=True no modelo. Resolver com SQL complementar (padrão 00N_*.sql).
