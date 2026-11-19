@@ -99,7 +99,7 @@ Tabelas: produtos, clientes, pedidos_avulsos, itens_pedido_avulso, assinaturas, 
 - `POST /assinaturas/{cliente_id}/escolhas` -> `{"produto_id": N, "quantidade": N}`. 201 com `{"escolha": {...}, "saldo_restante": N}`. Erros conforme regra 8; nenhum erro desconta saldo.
 
 ## Onde paramos (atualizado em 18/11/2026, fim da sessão)
-RESUMO: bloco 17 quase pronto, falta só o 17g (testes finais + atualizar seções do CLAUDE.md). Commits da sessão de 18/11 ainda NÃO foram enviados ao GitHub (falta `git push`).
+RESUMO: bloco 17 quase pronto, falta só o 17g (testes finais + atualizar seções do CLAUDE.md). Push feito em 18/11 às 19:35 (GitHub em dia até cdc393d). Pendente: decidir clientes 2 e 3 (recomendei marcar como Ativa no banco).
 
 Concluído: services `contratar_assinatura`, `escolher_marmita`, `renovar_assinatura`; schema `RenovacaoCreateSchema`.
 - **14c (feito, commit e898fe9):** rota `POST /assinaturas/{cliente_id}/renovacoes` no main.py (`criar_renovacao`).
