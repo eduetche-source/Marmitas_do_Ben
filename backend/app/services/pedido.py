@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from datetime import datetime
+from decimal import Decimal
 
 from sqlalchemy.orm import Session
 
@@ -8,7 +9,8 @@ from ..models.produto import Produto, PedidoAvulso, ItemPedidoAvulso
 from .cronograma import calcular_data_entrega_pedido, obter_ciclo_cardapio_atual
 
 STATUS_PAGAMENTO_PENDENTE = "Pendente"
-VALOR_FRETE = 10.00
+# Decimal (e nao float) para somar com os precos sem erro de arredondamento.
+VALOR_FRETE = Decimal("10.00")
 
 
 class PedidoError(Exception):
@@ -37,6 +39,7 @@ class PedidoProdutoForaDoCicloError(PedidoError):
 class ResultadoPedido:
     pedido: PedidoAvulso
     data_entrega_prevista: datetime
+    valor_total: Decimal
 
 
 def criar_pedido_avulso(db: Session, cliente_id: int, itens: list) -> ResultadoPedido:
@@ -59,6 +62,8 @@ def criar_pedido_avulso(db: Session, cliente_id: int, itens: list) -> ResultadoP
     # ativos e do ciclo atual.
     ciclo_atual = obter_ciclo_cardapio_atual()
 
+    valor_total = VALOR_FRETE
+
     for item in itens:
         produto = db.get(Produto, item.produto_id)
         if produto is None:
@@ -67,15 +72,23 @@ def criar_pedido_avulso(db: Session, cliente_id: int, itens: list) -> ResultadoP
         if not produto.ativo or produto.ciclo_cardapio != ciclo_atual:
             raise PedidoProdutoForaDoCicloError(item.produto_id)
 
+        # O preco e copiado para o item: mudar o preco do produto depois
+        # nao altera o valor deste pedido.
         pedido.itens.append(
             ItemPedidoAvulso(
                 produto_id=item.produto_id,
                 quantidade=item.quantidade,
+                preco_unitario=produto.preco,
             )
         )
+        valor_total += produto.preco * item.quantidade
 
     # Um unico commit: pedido e itens sao gravados juntos.
     db.add(pedido)
     db.commit()
     db.refresh(pedido)
-    return ResultadoPedido(pedido=pedido, data_entrega_prevista=data_entrega_prevista)
+    return ResultadoPedido(
+        pedido=pedido,
+        data_entrega_prevista=data_entrega_prevista,
+        valor_total=valor_total,
+    )

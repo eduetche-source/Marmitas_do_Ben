@@ -96,7 +96,8 @@ def criar_pedido(payload: PedidoCreateSchema, db: Session = Depends(get_db)):
         "pedido_id": resultado.pedido.id,
         "status_pagamento": resultado.pedido.status_pagamento,
         "data_entrega_prevista": resultado.data_entrega_prevista.strftime("%Y-%m-%d"),
-        "total_itens": len(resultado.pedido.itens)
+        "total_itens": len(resultado.pedido.itens),
+        "valor_total": str(resultado.valor_total),
     }
 
 
