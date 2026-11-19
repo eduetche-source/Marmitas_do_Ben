@@ -54,3 +54,10 @@ class CompraResponseSchema(BaseModel):
     plano_marmitas: int
     status_pagamento: str
     data_compra: Optional[datetime] = None
+
+
+class AssinaturaDetalheSchema(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    assinatura: AssinaturaResponseSchema
+    compra_pendente: Optional[CompraResponseSchema] = None
