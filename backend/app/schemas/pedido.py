@@ -12,7 +12,8 @@ class PedidoCreateSchema(BaseModel):
     itens: List[ItemPedidoSchema]
 
 
-# Saida do GET /pedidos-pendentes (admin).
+# Saida das rotas de admin: GET /pedidos-pendentes, confirmar pagamento
+# e cancelar pedido.
 
 class ClienteResumoSchema(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -22,7 +23,7 @@ class ClienteResumoSchema(BaseModel):
     whatsapp: str
 
 
-class ItemPendenteSchema(BaseModel):
+class ItemPedidoDetalheSchema(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     produto_id: int
@@ -31,12 +32,13 @@ class ItemPendenteSchema(BaseModel):
     preco_unitario: Decimal
 
 
-class PedidoPendenteSchema(BaseModel):
+class PedidoDetalheSchema(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     pedido_id: int
     data_pedido: Optional[datetime] = None
+    status_pagamento: str
     cliente: ClienteResumoSchema
-    itens: List[ItemPendenteSchema]
+    itens: List[ItemPedidoDetalheSchema]
     valor_frete: Decimal
     valor_total: Decimal
