@@ -16,7 +16,7 @@ from .models.assinatura import (
     EscolhaAssinante,
 )
 
-from .schemas.pedido import PedidoCreateSchema
+from .schemas.pedido import PedidoCreateSchema, PedidoPendenteSchema
 
 from .schemas.assinatura import (
     AssinaturaCreateSchema,
@@ -57,6 +57,7 @@ from .services.pedido import (
     PedidoClienteNaoEncontradoError,
     PedidoProdutoNaoEncontradoError,
     PedidoProdutoForaDoCicloError,
+    listar_pedidos_pendentes,
 )
 
 app = FastAPI(title="Marmitas do Ben API")
@@ -99,6 +100,12 @@ def criar_pedido(payload: PedidoCreateSchema, db: Session = Depends(get_db)):
         "total_itens": len(resultado.pedido.itens),
         "valor_total": str(resultado.valor_total),
     }
+
+
+# Rota de ADMIN (ainda sem login): mostra nome e WhatsApp dos clientes.
+@app.get("/pedidos-pendentes", response_model=list[PedidoPendenteSchema])
+def obter_pedidos_pendentes(db: Session = Depends(get_db)):
+    return listar_pedidos_pendentes(db)
 
 
 @app.post("/assinaturas", status_code=201, response_model=AssinaturaResponseSchema)

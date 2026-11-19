@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from ..models.cliente import Cliente
 from ..models.produto import Produto, PedidoAvulso, ItemPedidoAvulso
@@ -92,3 +92,65 @@ def criar_pedido_avulso(db: Session, cliente_id: int, itens: list) -> ResultadoP
         data_entrega_prevista=data_entrega_prevista,
         valor_total=valor_total,
     )
+
+
+@dataclass
+class ItemPendente:
+    produto_id: int
+    produto_nome: str
+    quantidade: int
+    preco_unitario: Decimal
+
+
+@dataclass
+class PedidoPendente:
+    pedido_id: int
+    data_pedido: datetime
+    cliente: Cliente
+    itens: list[ItemPendente]
+    valor_frete: Decimal
+    valor_total: Decimal
+
+
+def listar_pedidos_pendentes(db: Session) -> list[PedidoPendente]:
+    # Somente leitura: pedidos aguardando pagamento, do mais antigo para o
+    # mais novo (quem espera ha mais tempo aparece primeiro).
+    # selectinload busca clientes, itens e produtos em poucas consultas,
+    # em vez de uma consulta por pedido.
+    pedidos = (
+        db.query(PedidoAvulso)
+        .options(
+            selectinload(PedidoAvulso.cliente),
+            selectinload(PedidoAvulso.itens).selectinload(ItemPedidoAvulso.produto),
+        )
+        .filter(PedidoAvulso.status_pagamento == STATUS_PAGAMENTO_PENDENTE)
+        .order_by(PedidoAvulso.data_pedido.asc(), PedidoAvulso.id.asc())
+        .all()
+    )
+
+    resultado = []
+    for pedido in pedidos:
+        # Total pelo preco gravado em cada item (nao pelo preco atual do produto).
+        valor_total = pedido.valor_frete + sum(
+            (item.preco_unitario * item.quantidade for item in pedido.itens),
+            Decimal("0.00"),
+        )
+        resultado.append(
+            PedidoPendente(
+                pedido_id=pedido.id,
+                data_pedido=pedido.data_pedido,
+                cliente=pedido.cliente,
+                itens=[
+                    ItemPendente(
+                        produto_id=item.produto_id,
+                        produto_nome=item.produto.nome,
+                        quantidade=item.quantidade,
+                        preco_unitario=item.preco_unitario,
+                    )
+                    for item in pedido.itens
+                ],
+                valor_frete=pedido.valor_frete,
+                valor_total=valor_total,
+            )
+        )
+    return resultado
