@@ -16,7 +16,7 @@ from .models.assinatura import (
     EscolhaAssinante,
 )
 
-from .schemas.pedido import PedidoCreateSchema, PedidoPendenteSchema
+from .schemas.pedido import PedidoCreateSchema, PedidoDetalheSchema
 
 from .schemas.assinatura import (
     AssinaturaCreateSchema,
@@ -58,6 +58,10 @@ from .services.pedido import (
     PedidoProdutoNaoEncontradoError,
     PedidoProdutoForaDoCicloError,
     listar_pedidos_pendentes,
+    confirmar_pagamento_pedido,
+    cancelar_pedido,
+    PedidoNaoEncontradoError,
+    PedidoNaoPendenteError,
 )
 
 app = FastAPI(title="Marmitas do Ben API")
@@ -103,9 +107,31 @@ def criar_pedido(payload: PedidoCreateSchema, db: Session = Depends(get_db)):
 
 
 # Rota de ADMIN (ainda sem login): mostra nome e WhatsApp dos clientes.
-@app.get("/pedidos-pendentes", response_model=list[PedidoPendenteSchema])
+@app.get("/pedidos-pendentes", response_model=list[PedidoDetalheSchema])
 def obter_pedidos_pendentes(db: Session = Depends(get_db)):
     return listar_pedidos_pendentes(db)
+
+
+# Rota de ADMIN (ainda sem login).
+@app.post("/pedidos/{pedido_id}/confirmar-pagamento", response_model=PedidoDetalheSchema)
+def criar_confirmacao_pagamento_pedido(pedido_id: int, db: Session = Depends(get_db)):
+    try:
+        return confirmar_pagamento_pedido(db, pedido_id)
+    except PedidoNaoEncontradoError:
+        raise HTTPException(status_code=404, detail=f"Pedido com ID {pedido_id} não encontrado.")
+    except PedidoNaoPendenteError as erro:
+        raise HTTPException(status_code=409, detail=f"O pedido não está aguardando pagamento (status atual: {erro.status_atual}).")
+
+
+# Rota de ADMIN (ainda sem login).
+@app.post("/pedidos/{pedido_id}/cancelar", response_model=PedidoDetalheSchema)
+def criar_cancelamento_pedido(pedido_id: int, db: Session = Depends(get_db)):
+    try:
+        return cancelar_pedido(db, pedido_id)
+    except PedidoNaoEncontradoError:
+        raise HTTPException(status_code=404, detail=f"Pedido com ID {pedido_id} não encontrado.")
+    except PedidoNaoPendenteError as erro:
+        raise HTTPException(status_code=409, detail=f"O pedido não está aguardando pagamento (status atual: {erro.status_atual}).")
 
 
 @app.post("/assinaturas", status_code=201, response_model=AssinaturaResponseSchema)
