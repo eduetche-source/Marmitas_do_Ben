@@ -183,6 +183,25 @@ def consultar_assinatura(db: Session, cliente_id: int) -> ResultadoConsultaAssin
     )
 
 
+def listar_compras(db: Session, cliente_id: int) -> list[CompraAssinatura]:
+    # Somente leitura: historico de compras, da mais recente para a mais antiga.
+    cliente = db.get(Cliente, cliente_id)
+    if cliente is None:
+        raise ClienteNaoEncontradoError(cliente_id)
+
+    assinatura = db.query(Assinatura).filter(Assinatura.cliente_id == cliente_id).first()
+    if assinatura is None:
+        raise AssinaturaNaoEncontradaError(cliente_id)
+
+    # id desempata compras gravadas no mesmo instante.
+    return (
+        db.query(CompraAssinatura)
+        .filter(CompraAssinatura.cliente_id == cliente_id)
+        .order_by(CompraAssinatura.data_compra.desc(), CompraAssinatura.id.desc())
+        .all()
+    )
+
+
 def renovar_assinatura(db: Session, cliente_id: int, plano_marmitas: int) -> CompraAssinatura:
     cliente = db.get(Cliente, cliente_id)
     if cliente is None:

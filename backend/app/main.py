@@ -49,6 +49,7 @@ from .services.assinatura import (
     SemCompraPendenteError,
     cancelar_compra,
     consultar_assinatura,
+    listar_compras,
 )
 
 from .services.pedido import (
@@ -113,6 +114,19 @@ def criar_assinatura(payload: AssinaturaCreateSchema, db: Session = Depends(get_
 def obter_assinatura(cliente_id: int, db: Session = Depends(get_db)):
     try:
         return consultar_assinatura(db, cliente_id)
+    except ClienteNaoEncontradoError:
+        raise HTTPException(status_code=404, detail=f"Cliente com ID {cliente_id} não encontrado.")
+    except AssinaturaNaoEncontradaError:
+        raise HTTPException(status_code=404, detail="Este cliente não possui assinatura.")
+
+
+@app.get(
+    "/assinaturas/{cliente_id}/compras",
+    response_model=list[CompraResponseSchema],
+)
+def obter_compras(cliente_id: int, db: Session = Depends(get_db)):
+    try:
+        return listar_compras(db, cliente_id)
     except ClienteNaoEncontradoError:
         raise HTTPException(status_code=404, detail=f"Cliente com ID {cliente_id} não encontrado.")
     except AssinaturaNaoEncontradaError:
