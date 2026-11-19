@@ -45,7 +45,7 @@ Atue como Software Architect + Technical Mentor. Estou aprendendo arquitetura en
 
 ## Estrutura
 ```
-database/   init.sql, seeds.sql, 002_compras_assinatura.sql, 003_status_pagamento_compras.sql
+database/   init.sql, seeds.sql, 002_compras_assinatura.sql, 003_status_pagamento_compras.sql, 004_preco_itens_pedido.sql
 backend/app/
   database.py   engine, SessionLocal, Base, get_db
   main.py       rotas
@@ -94,17 +94,20 @@ Tabelas: produtos, clientes, pedidos_avulsos, itens_pedido_avulso, assinaturas, 
 ## O que já funciona (testado no Swagger) — NÃO quebrar
 - `GET /` -> Online
 - `GET /marmitas-ativas` -> produtos ativos do ciclo atual
-- `POST /pedidos` -> 201, Pendente, frete fixo 10.00, previsão de entrega. Corpo: `{"cliente_id": 1, "itens": [{"produto_id": N, "quantidade": 2}]}` com N do ciclo ATUAL (ver GET /marmitas-ativas). Erros: 404 cliente; 404 produto; 422 produto inativo/fora do ciclo. Item inválido recusa o pedido inteiro (nada é gravado). Lógica em `services/pedido.py`.
+- `POST /pedidos` -> 201, Pendente, frete fixo 10.00, previsão de entrega, `valor_total` (preço gravado no item na hora da venda). Corpo: `{"cliente_id": 1, "itens": [{"produto_id": N, "quantidade": 2}]}` com N do ciclo ATUAL (ver GET /marmitas-ativas). Erros: 404 cliente; 404 produto; 422 produto inativo/fora do ciclo. Item inválido recusa o pedido inteiro (nada é gravado). Lógica em `services/pedido.py`.
 - `POST /assinaturas` -> `{"cliente_id": N, "plano_marmitas": 12}`. 201 Pendente com saldo 0 + compra Pendente; 409 já tem; 404 cliente; 422 plano.
 - `POST /assinaturas/{cliente_id}/escolhas` -> `{"produto_id": N, "quantidade": N}`. 201 com `{"escolha": {...}, "saldo_restante": N}`. Funciona também com renovação Pendente em aberto (usa as sobras). Erros conforme regra 8; nenhum erro desconta saldo.
 - `POST /assinaturas/{cliente_id}/renovacoes` -> `{"plano_marmitas": 12}`. 201 com a COMPRA Pendente (saldo/status não mudam); 409 se já há compra Pendente; 404 cliente/assinatura; 422 plano.
 - `POST /assinaturas/{cliente_id}/confirmar-pagamento` (sem corpo) -> 200 com a assinatura: compra Paga, saldo += plano, plano atualizado, Ativa (também reativa Encerrada). 409 sem compra Pendente; 404.
 - `POST /assinaturas/{cliente_id}/cancelar-compra` (sem corpo) -> 200 com a assinatura: compra Cancelada, saldo intacto; 1ª compra (Pendente) -> Encerrada. 409 sem compra Pendente; 404.
 - `GET /assinaturas/{cliente_id}` -> 200 `{"assinatura": {...}, "compra_pendente": {...} | null}`; 404 cliente/assinatura.
+- `GET /assinaturas/{cliente_id}/compras` -> 200 lista de compras, mais recente primeiro; 404 cliente/assinatura.
+- `GET /pedidos-pendentes` (admin) -> 200 lista de pedidos avulsos Pendentes, mais antigo primeiro, com cliente, itens, status e valor_total; `[]` se não houver.
+- `POST /pedidos/{pedido_id}/confirmar-pagamento` e `POST /pedidos/{pedido_id}/cancelar` (admin, sem corpo) -> 200 com o pedido (Pago / Cancelado); 404 pedido; 409 se não está Pendente.
 - Rotas de confirmar/cancelar são de ADMIN e ainda não têm login (ver pendência de segurança).
 
 ## Onde paramos (atualizado em 19/11/2026)
-RESUMO: blocos 14 a 17 CONCLUÍDOS e testados. Próximo: bloco 18 (rotas GET). Detalhes de cada passo antigo estão no `git log`.
+RESUMO: blocos 14 a 17 CONCLUÍDOS e testados; 18a e 18b feitos. Foco mudou para a venda avulsa: 19A, 19B e 19C feitos; próximo é o 19D (GET /producao-da-semana, decidir antes o que conta como "semana"). Detalhes de cada passo antigo estão no `git log`.
 
 Histórico curto:
 - Bloco 14 (renovação) e 15 (push): 18/11.
@@ -115,17 +118,22 @@ Roteiro combinado (18/11/2026), nesta ordem:
 1. ~~Terminar o bloco 17.~~ (feito em 19/11)
 2. **Bloco 18 (EM ANDAMENTO): rotas GET** (as 4 aprovadas em 19/11):
    - **18a (feito, 394ada8 + 14441d0, testado):** `GET /assinaturas/{cliente_id}` -> `{"assinatura": {...}, "compra_pendente": {...} | null}`. Service `consultar_assinatura` (só leitura). Extraído `_consultar_compra_pendente`, usado também por renovar e `_buscar_compra_pendente` (renovar/confirmar retestados).
-   - **18b (PRÓXIMO):** `GET /assinaturas/{cliente_id}/compras` — histórico de compras do cliente.
-   - **18c:** `GET /compras-pendentes` — todas as compras aguardando pagamento (admin).
-   - **18d:** `GET /producao-da-semana` — soma de escolhas + pedidos avulsos por produto. ANTES: decidir comigo o que conta como "semana" (ex.: feitos de sexta a quinta, entregues na segunda seguinte).
-3. Frontend começando pela parte do CLIENTE (cardápio da semana + fazer pedido), que não precisa de login. Decidir tecnologia comigo (HTML/JS simples ou React).
-4. Painel de admin junto com o login.
-- Pendência de segurança (OBRIGATÓRIA antes de publicar na internet): rotas de admin (confirmar/cancelar) não têm login.
+   - **18b (feito, e500aa5, testado):** `GET /assinaturas/{cliente_id}/compras` -> lista de compras (mais recente primeiro; desempate por id). Service `listar_compras` (só leitura). 404 cliente/assinatura.
+   - **MUDANÇA DE FOCO (19/11/2026):** a assinatura não vendeu nenhuma na prática; o foco agora é a VENDA AVULSA. O código de assinatura fica como está (funciona, testado), sem investir mais. 18c (`GET /compras-pendentes`) e 18d saíram da fila e viraram o bloco 19.
+3. **Bloco 19 (EM ANDAMENTO): pedido avulso completo**, nesta ordem:
+   - **19A (feito, b283a43 + 5e1c9f1 + ec54786, testado):** SQL 004 executado (coluna `preco_unitario` NOT NULL em itens_pedido_avulso; itens antigos, todos de teste, receberam o preço atual). Service copia `produto.preco` para o item e soma o total em Decimal (frete virou `Decimal("10.00")`: dinheiro nunca em float). `POST /pedidos` devolve `"valor_total"` (string, ex.: "57.80").
+   - **19B (feito, ab48bae + 41afa10, testado):** `GET /pedidos-pendentes` (admin, sem login) -> lista do mais antigo para o mais novo, com cliente (id, nome, whatsapp), itens (produto_nome, quantidade, preco_unitario), valor_frete e valor_total (calculado pelo preço gravado no item). Service `listar_pedidos_pendentes` com `selectinload` (evita uma consulta por pedido); devolve dataclasses `PedidoPendente`/`ItemPendente`.
+   - **19C (feito, bad324d + 2c24a22, testado):** `POST /pedidos/{pedido_id}/confirmar-pagamento` (Pendente -> Pago) e `POST /pedidos/{pedido_id}/cancelar` (Pendente -> Cancelado), admin, sem corpo, 200 com o pedido. 404 pedido inexistente; 409 se não está Pendente (mensagem mostra o status atual). Decidido em 19/11: status no masculino ("Pago"/"Cancelado", é o pedido); pedido Pago NÃO pode ser cancelado (devolução seria outro fluxo, futuro). Schema renomeado para `PedidoDetalheSchema` (+ `status_pagamento`); service com `_montar_detalhe` (total pelo preço do item) e `_buscar_pedido_pendente` (trava com with_for_update).
+   - **19D (PRÓXIMO):** `GET /producao-da-semana` (o que cozinhar, foco nos avulsos). ANTES: decidir comigo o que conta como "semana".
+   - (Assinatura, se voltar a importar: `GET /compras-pendentes` com nome/WhatsApp, aprovado em 19/11.)
+4. Frontend começando pela parte do CLIENTE (cardápio da semana + fazer pedido), que não precisa de login. Decidir tecnologia comigo (HTML/JS simples ou React).
+5. Painel de admin junto com o login.
+- Pendência de segurança (OBRIGATÓRIA antes de publicar na internet): rotas de admin (confirmar/cancelar de assinatura e de pedido, GET /pedidos-pendentes com WhatsApp dos clientes) não têm login.
 - Talvez: rota para encerrar assinatura Ativa (Ativa -> Encerrada), se eu quiser.
 - Talvez: rota para cadastrar cliente (hoje só direto no banco).
 - Limpeza opcional: import `calcular_data_entrega_pedido` sem uso no main.py.
 
-Dados de teste em 19/11/2026 (conferir no banco): todas as assinaturas Ativa — cliente 1 = plano 20, saldo 52; cliente 2 = plano 12, saldo 24 (renovou e pagou no teste do 18a); cliente 3 = plano 20, saldo 32; cliente 4 ("Cliente Teste 4", criado direto no banco) = plano 12, saldo 12. compras_assinatura: 11 linhas, nenhuma Pendente.
+Dados de teste em 19/11/2026 (conferir no banco): todas as assinaturas Ativa — cliente 1 = plano 20, saldo 52; cliente 2 = plano 12, saldo 24 (renovou e pagou no teste do 18a); cliente 3 = plano 20, saldo 32; cliente 4 ("Cliente Teste 4", criado direto no banco) = plano 12, saldo 12. compras_assinatura: 11 linhas, nenhuma Pendente. Pedidos avulsos (19/11, fim da sessão): pedido 1 = Pago, pedido 2 = Cancelado, os demais (3 em diante, 14 pedidos) Pendentes; todos de teste.
 
 ## Pendências conhecidas (NÃO mexer sem eu pedir)
 1. `database/init.sql` desatualizado: falta coluna `ciclo_cardapio` em produtos; `produtos.ativo` DEFAULT FALSE no SQL vs default=True no modelo. Resolver com SQL complementar (padrão 00N_*.sql).
