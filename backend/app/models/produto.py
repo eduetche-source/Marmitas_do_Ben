@@ -131,6 +131,12 @@ class ItemPedidoAvulso(Base):
         nullable=False,
     )
 
+    # Preco do produto no momento da venda (database/004_preco_itens_pedido.sql).
+    preco_unitario = Column(
+        Numeric(10, 2),
+        nullable=False,
+    )
+
     pedido = relationship(
         "PedidoAvulso",
         back_populates="itens",
